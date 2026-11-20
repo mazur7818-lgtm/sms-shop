@@ -8,22 +8,14 @@ from fastapi.responses import HTMLResponse
 app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
-SMS_API_KEY = "1b8d7cc1c33d18031A4b81e7152fAd02"
-BASE_API_URL = "https://hero-sms.com"
+SMS_API_KEY = "0438dedf43288baac4f1e0f8db986b77"
+SMS_API_URL = "https://grizzlysms.com"
 ADMIN_SECRET = "admin123"
 MARKUP = 1.5
 
 SB_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 # =============================================
-
-API_HEADERS = {
-    "Authorization": f"ApiKey {SMS_API_KEY}",
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "Origin": "https://hero-sms.com",
-    "Referer": "https://hero-sms.com"
-}
 
 SB_HEADERS = {
     "apikey": SB_KEY,
@@ -93,48 +85,49 @@ async def create_promo(secret: str, amount: float):
 
 @app.post("/api/order")
 async def create_order(service: str, country: int, price: float, user_id: str = "demo_user"):
-    async with AsyncSession(impersonate="chrome120") as client:
+    async with AsyncSession() as client:
         u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
         bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
         if bal < price:
             return {"status": "error", "message": "Недостаточно средств на балансе!"}
 
-        payload = {"service": service, "country": country, "amount": 1}
-        resp = await client.post(f"{BASE_API_URL}/activations", json=payload, headers=API_HEADERS)
-        if resp.status_code == 200:
-            items = resp.json().get("data", [])
-            if items:
-                activation = items
-                order_id = str(activation["id"])
-                phone = str(activation["phone"])
-                new_bal = round(bal - price, 2)
-                await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
-                formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
-                return {"status": "ok", "order_id": order_id, "phone": formatted_phone, "balance": new_bal}
-        return {"status": "error", "message": f"Ответ API ({resp.status_code}): {resp.text}"}
+        params = {
+            "api_key": SMS_API_KEY,
+            "action": "getNumber",
+            "service": service,
+            "country": country
+        }
+        resp = await client.get(SMS_API_URL, params=params)
+        text = resp.text  # Формат: ACCESS_NUMBER:ID:PHONE
+        if "ACCESS_NUMBER" in text:
+            _, order_id, phone = text.split(":")
+            new_bal = round(bal - price, 2)
+            await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
+            formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
+            return {"status": "ok", "order_id": order_id, "phone": formatted_phone, "balance": new_bal}
+        return {"status": "error", "message": f"Ответ GrizzlySMS: {text}"}
 
 @app.get("/api/status/{order_id}")
 async def check_status(order_id: str):
-    async with AsyncSession(impersonate="chrome120") as client:
-        resp = await client.get(f"{BASE_API_URL}/activations/{order_id}/otp", headers=API_HEADERS)
-        if resp.status_code == 200:
-            otp_list = resp.json().get("data", [])
-            if isinstance(otp_list, list) and len(otp_list) > 0:
-                code = otp_list[-1].get("smsCode")
-                if code:
-                    return {"status": "received", "code": code}
-            elif isinstance(otp_list, dict) and otp_list.get("smsCode"):
-                return {"status": "received", "code": otp_list["smsCode"]}
+    async with AsyncSession() as client:
+        params = {"api_key": SMS_API_KEY, "action": "getStatus", "id": order_id}
+        resp = await client.get(SMS_API_URL, params=params)
+        text = resp.text
+        if "STATUS_OK" in text:
+            code = text.split(":")
+            await client.get(SMS_API_URL, params={"api_key": SMS_API_KEY, "action": "setStatus", "status": "6", "id": order_id})
+            return {"status": "received", "code": code}
         return {"status": "waiting"}
 
 @app.post("/api/cancel/{order_id}")
 async def cancel_order(order_id: str, price: float, user_id: str = "demo_user"):
-    async with AsyncSession(impersonate="chrome120") as client:
-        resp = await client.delete(f"{BASE_API_URL}/activations/{order_id}", headers=API_HEADERS)
-        if resp.status_code in (200, 204):
+    async with AsyncSession() as client:
+        params = {"api_key": SMS_API_KEY, "action": "setStatus", "status": "8", "id": order_id}
+        resp = await client.get(SMS_API_URL, params=params)
+        if "ACCESS_CANCEL" in resp.text:
             u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
             bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
             new_bal = round(bal + price, 2)
             await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
             return {"status": "ok", "balance": new_bal}
-        return {"status": "error", "message": f"Не удалось отменить ({resp.status_code}): {resp.text}"}
+        return {"status": "error", "message": f"Не удалось отменить: {resp.text}"}
