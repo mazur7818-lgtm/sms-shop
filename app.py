@@ -9,7 +9,7 @@ app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
 SMS_API_KEY = "0438dedf43288baac4f1e0f8db986b77"
-SMS_API_URL = "https://grizzlysms.com"
+SMS_API_URL = "https://api.grizzlysms.com/stubs/handler_api.php"
 ADMIN_SECRET = "admin123"
 MARKUP = 1.5
 
@@ -22,6 +22,11 @@ SB_HEADERS = {
     "Authorization": f"Bearer {SB_KEY}",
     "Content-Type": "application/json",
     "Prefer": "return=representation"
+}
+
+GRIZZLY_HEADERS = {
+    "Accept": "text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 def first_item(data):
@@ -104,14 +109,9 @@ async def create_order(service: str, country: int, price: float, user_id: str = 
         if bal < price:
             return {"status": "error", "message": "Недостаточно средств на балансе!"}
 
-        params = {
-            "api_key": SMS_API_KEY,
-            "action": "getNumber",
-            "service": service,
-            "country": country
-        }
-        resp = await client.get(SMS_API_URL, params=params)
-        text = resp.text
+        url = f"{SMS_API_URL}?api_key={SMS_API_KEY}&action=getNumber&service={service}&country={country}"
+        resp = await client.get(url, headers=GRIZZLY_HEADERS)
+        text = resp.text.strip()
         if "ACCESS_NUMBER" in text:
             parts = text.split(":")
             order_id = parts[1]
@@ -125,21 +125,21 @@ async def create_order(service: str, country: int, price: float, user_id: str = 
 @app.get("/api/status/{order_id}")
 async def check_status(order_id: str):
     async with AsyncSession() as client:
-        params = {"api_key": SMS_API_KEY, "action": "getStatus", "id": order_id}
-        resp = await client.get(SMS_API_URL, params=params)
-        text = resp.text
+        url = f"{SMS_API_URL}?api_key={SMS_API_KEY}&action=getStatus&id={order_id}"
+        resp = await client.get(url, headers=GRIZZLY_HEADERS)
+        text = resp.text.strip()
         if "STATUS_OK" in text:
             parts = text.split(":")
             code = parts[1]
-            await client.get(SMS_API_URL, params={"api_key": SMS_API_KEY, "action": "setStatus", "status": "6", "id": order_id})
+            await client.get(f"{SMS_API_URL}?api_key={SMS_API_KEY}&action=setStatus&status=6&id={order_id}", headers=GRIZZLY_HEADERS)
             return {"status": "received", "code": code}
         return {"status": "waiting"}
 
 @app.post("/api/cancel/{order_id}")
 async def cancel_order(order_id: str, price: float, user_id: str = "demo_user"):
     async with AsyncSession() as client:
-        params = {"api_key": SMS_API_KEY, "action": "setStatus", "status": "8", "id": order_id}
-        resp = await client.get(SMS_API_URL, params=params)
+        url = f"{SMS_API_URL}?api_key={SMS_API_KEY}&action=setStatus&status=8&id={order_id}"
+        resp = await client.get(url, headers=GRIZZLY_HEADERS)
         if "ACCESS_CANCEL" in resp.text:
             u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
             user_row = first_item(u.json()) if u.status_code == 200 else None
