@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS-Shop — Виртуальные номера</title>
+    <style>
+        :root {
+            --bg: #0b0f19; --card: #131a2b; --card-hover: #1a233a;
+            --border: #232f4b; --primary: #10b981; --primary-hover: #059669;
+            --danger: #ef4444; --text: #f8fafc; --muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 30px 20px; }
+        .container { max-width: 820px; margin: 0 auto; }
+        header {
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;
+            padding-bottom: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border);
+        }
+        .logo { font-size: 24px; font-weight: 800; color: var(--primary); }
+        .logo span { color: var(--text); }
+        .wallet {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--card); padding: 8px 14px; border-radius: 12px; border: 1px solid var(--border);
+        }
+        .balance-val { font-weight: 800; color: var(--primary); font-size: 16px; }
+        .promo-input {
+            background: var(--bg); border: 1px solid var(--border); color: #fff;
+            padding: 6px 10px; border-radius: 8px; width: 140px; font-size: 13px;
+        }
+        .small-btn {
+            background: #2563eb; color: #fff; border: none; padding: 6px 12px;
+            border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+        .small-btn:hover { background: #1d4ed8; }
+        .box {
+            display: none; background: linear-gradient(145deg, #131c31, #0f172a);
+            border: 1px solid var(--primary); border-radius: 16px; padding: 24px;
+            margin-bottom: 32px; box-shadow: 0 10px 30px rgba(16, 185, 129, 0.12);
+        }
+        .order-label { font-size: 13px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+        .phone-row { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        #order-phone { font-size: 28px; font-weight: 700; font-family: monospace; color: #fff; }
+        .copy-btn {
+            background: #1e293b; color: #fff; border: 1px solid var(--border);
+            padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
+        }
+        .copy-btn:hover { background: #334155; }
+        .cancel-btn {
+            background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; margin-left: auto;
+        }
+        .sms-box {
+            background: #0b0f19; padding: 14px 18px; border-radius: 10px;
+            border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;
+        }
+        .code-wait { color: #fbbf24; font-weight: 600; }
+        .code-done { color: var(--primary); font-size: 22px; font-weight: 800; font-family: monospace; }
+        h2 { font-size: 18px; color: var(--muted); margin-bottom: 16px; font-weight: 500; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+        .card {
+            background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+            padding: 20px; display: flex; justify-content: space-between; align-items: center;
+        }
+        .card:hover { border-color: #3b4d75; background: var(--card-hover); }
+        .service-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+        .country-name { font-size: 13px; color: var(--muted); }
+        .buy-btn {
+            background: var(--primary); color: #052e16; border: none;
+            padding: 10px 18px; border-radius: 10px; font-weight: 700; font-size: 14px; cursor: pointer;
+        }
+        .buy-btn:hover { background: var(--primary-hover); color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">SMS<span>-Shop</span></div>
+            <div class="wallet">
+                <span>Баланс: <span id="balance" class="balance-val">$0.00</span></span>
+                <input type="text" id="promo-code" class="promo-input" placeholder="Промокод (TEST1)">
+                <button class="small-btn" onclick="redeemPromo()">Пополнить</button>
+            </div>
+        </header>
+
+        <div id="active-order" class="box">
+            <div class="order-label">Ваш виртуальный номер</div>
+            <div class="phone-row">
+                <div id="order-phone"></div>
+                <button class="copy-btn" onclick="copyText('order-phone')">Скопировать</button>
+                <button id="cancel-btn" class="cancel-btn" onclick="cancelOrder()">Отменить номер</button>
+            </div>
+            <div class="sms-box">
+                <span style="color: var(--muted);">Код подтверждения:</span>
+                <span id="order-code" class="code-wait">Ожидание SMS...</span>
+            </div>
+        </div>
+
+        <h2>Выберите сервис и страну:</h2>
+        <div id="services-list" class="grid"></div>
+    </div>
+
+    <script>
+        let pollInterval = null;
+        let currentOrder = null;
+
+        async function loadInit() {
+            const res = await fetch('/api/init');
+            const data = await res.json();
+            document.getElementById('balance').innerText = '$' + data.balance.toFixed(2);
+            document.getElementById('services-list').innerHTML = data.services.map(item => `
+                <div class="card">
+                    <div>
+                        <div class="service-name">${item.name}</div>
+                        <div class="country-name">${item.country_name}</div>
+                    </div>
+                    <button class="buy-btn" onclick="buyNumber('${item.id}', '${item.country}', ${item.price})">
+                        Купить • $${item.price}
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        async function redeemPromo() {
+            const code = document.getElementById('promo-code').value;
+            if (!code) return;
+            const res = await fetch(`/api/redeem?code=${encodeURIComponent(code)}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                document.getElementById('balance').innerText = '$' + data.balance.toFixed(2);
+                document.getElementById('promo-code').value = '';
+                alert(`Баланс пополнен на $${data.added}!`);
+            } else {
+                alert(data.message);
+            }
+        }
+
+        async function buyNumber(service, country, price) {
+            const res = await fetch(`/api/order?service=${service}&country=${country}&price=${price}`, { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.status === 'ok') {
+                currentOrder = { id: data.order_id, price: price };
+                document.getElementById('balance').innerText = '$' + data.balance.toFixed(2);
+                document.getElementById('active-order').style.display = 'block';
+                document.getElementById('order-phone').innerText = data.phone;
+                
+                const codeEl = document.getElementById('order-code');
+                codeEl.innerText = 'Ожидание SMS...';
+                codeEl.className = 'code-wait';
+
+                if (pollInterval) clearInterval(pollInterval);
+                pollInterval = setInterval(() => checkSms(data.order_id), 3000);
+            } else {
+                alert(data.message);
+            }
+        }
+
+        async function checkSms(orderId) {
+            const res = await fetch(`/api/status/${orderId}`);
+            const data = await res.json();
+            if (data.status === 'received') {
+                clearInterval(pollInterval);
+                const codeEl = document.getElementById('order-code');
+                codeEl.innerText = data.code;
+                codeEl.className = 'code-done';
+            }
+        }
+
+        async function cancelOrder() {
+            if (!currentOrder) return;
+            const res = await fetch(`/api/cancel/${currentOrder.id}?price=${currentOrder.price}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.status === 'ok') {
+                clearInterval(pollInterval);
+                document.getElementById('active-order').style.display = 'none';
+                document.getElementById('balance').innerText = '$' + data.balance.toFixed(2);
+                alert('Номер отменен, средства возвращены на баланс');
+            } else {
+                alert(data.message);
+            }
+        }
+
+        function copyText(id) {
+            const text = document.getElementById(id).innerText;
+            navigator.clipboard.writeText(text);
+            alert('Скопировано: ' + text);
+        }
+
+        loadInit();
+    </script>
+</body>
+</html>
