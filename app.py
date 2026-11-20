@@ -15,19 +15,14 @@ MARKUP = 1.5
 
 SB_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SB_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
-
-CF_COOKIE = "Cv7CEVdQVA15xbZ_AO5xVhUnbCH22tdnVRnv9s5oheLJ1NJ42UEs1elf5ylh4o3Xw8k9TU1S2oVgAw1lAQyFG_P2XqWBBv6cFWD6u4qNf9SCj3ypHf6K73BoQlUORq8OWTH_jjTevzRBJfJtelNOnykjJMWu14i1Vj5PIX-1AZlCaYZ67zFCHBpNeLsNxO-vUeVFcuTzkgXhAJDkQjuA4l_Fg44dEAeKBWjSv31-bUcVnbM-tIu4kG6lq8fqsjwGC43A6XL8BXZD3GMzGHp9cJ3F3rDEYDQU8vhDguS2chIeaI-I2Ezm"
 # =============================================
 
 API_HEADERS = {
     "Authorization": f"ApiKey {SMS_API_KEY}",
     "Content-Type": "application/json",
     "Accept": "application/json",
-    "Origin": "https://hero-sms.com",
-    "Referer": "https://hero-sms.com",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+    "User-Agent": "Python-API-Client/1.0"
 }
-COOKIES = {"cf_clearance": CF_COOKIE}
 
 SB_HEADERS = {
     "apikey": SB_KEY,
@@ -49,7 +44,7 @@ async def init_data(user_id: str = "demo_user"):
         async with AsyncSession() as client:
             r = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
             if r.status_code == 200 and r.json():
-                bal = float(r.json()[0]["balance"])
+                bal = float(r.json()["balance"])
             elif r.status_code == 200:
                 await client.post(f"{SB_URL}/rest/v1/users", json={"user_id": user_id, "balance": 0.0}, headers=SB_HEADERS)
 
@@ -72,10 +67,10 @@ async def redeem_promo(code: str, user_id: str = "demo_user"):
     async with AsyncSession() as client:
         r = await client.get(f"{SB_URL}/rest/v1/promocodes?code=eq.{code}", headers=SB_HEADERS)
         if r.status_code == 200 and r.json():
-            amount = float(r.json()[0]["amount"])
+            amount = float(r.json()["amount"])
             await client.delete(f"{SB_URL}/rest/v1/promocodes?code=eq.{code}", headers=SB_HEADERS)
             u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-            cur_bal = float(u.json()[0]["balance"]) if (u.status_code == 200 and u.json()) else 0.0
+            cur_bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
             new_bal = round(cur_bal + amount, 2)
             if u.status_code == 200 and u.json():
                 await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
@@ -99,16 +94,16 @@ async def create_promo(secret: str, amount: float):
 async def create_order(service: str, country: int, price: float, user_id: str = "demo_user"):
     async with AsyncSession() as client:
         u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-        bal = float(u.json()[0]["balance"]) if (u.status_code == 200 and u.json()) else 0.0
+        bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
         if bal < price:
             return {"status": "error", "message": "Недостаточно средств на балансе!"}
 
         payload = {"service": service, "country": country, "amount": 1}
-        resp = await client.post(f"{BASE_API_URL}/activations", json=payload, headers=API_HEADERS, cookies=COOKIES)
+        resp = await client.post(f"{BASE_API_URL}/activations", json=payload, headers=API_HEADERS)
         if resp.status_code == 200:
             items = resp.json().get("data", [])
             if items:
-                activation = items[0]
+                activation = items
                 order_id = str(activation["id"])
                 phone = str(activation["phone"])
                 new_bal = round(bal - price, 2)
@@ -120,7 +115,7 @@ async def create_order(service: str, country: int, price: float, user_id: str = 
 @app.get("/api/status/{order_id}")
 async def check_status(order_id: str):
     async with AsyncSession() as client:
-        resp = await client.get(f"{BASE_API_URL}/activations/{order_id}/otp", headers=API_HEADERS, cookies=COOKIES)
+        resp = await client.get(f"{BASE_API_URL}/activations/{order_id}/otp", headers=API_HEADERS)
         if resp.status_code == 200:
             otp_list = resp.json().get("data", [])
             if isinstance(otp_list, list) and len(otp_list) > 0:
@@ -134,10 +129,10 @@ async def check_status(order_id: str):
 @app.post("/api/cancel/{order_id}")
 async def cancel_order(order_id: str, price: float, user_id: str = "demo_user"):
     async with AsyncSession() as client:
-        resp = await client.delete(f"{BASE_API_URL}/activations/{order_id}", headers=API_HEADERS, cookies=COOKIES)
+        resp = await client.delete(f"{BASE_API_URL}/activations/{order_id}", headers=API_HEADERS)
         if resp.status_code in (200, 204):
             u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-            bal = float(u.json()[0]["balance"]) if (u.status_code == 200 and u.json()) else 0.0
+            bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
             new_bal = round(bal + price, 2)
             await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
             return {"status": "ok", "balance": new_bal}
