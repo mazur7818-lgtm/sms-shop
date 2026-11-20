@@ -1,4 +1,4 @@
 fastapi
 uvicorn
 curl_cffi
-psycopg2-binary
+pg8000
