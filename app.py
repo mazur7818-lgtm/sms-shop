@@ -24,6 +24,13 @@ SB_HEADERS = {
     "Prefer": "return=representation"
 }
 
+def first_item(data):
+    if isinstance(data, list) and len(data) > 0:
+        return next(iter(data))
+    if isinstance(data, dict):
+        return data
+    return None
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
@@ -36,10 +43,12 @@ async def init_data(user_id: str = "demo_user"):
     if SB_URL and SB_KEY:
         async with AsyncSession() as client:
             r = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-            if r.status_code == 200 and r.json():
-                bal = float(r.json()["balance"])
-            elif r.status_code == 200:
-                await client.post(f"{SB_URL}/rest/v1/users", json={"user_id": user_id, "balance": 0.0}, headers=SB_HEADERS)
+            if r.status_code == 200:
+                row = first_item(r.json())
+                if row:
+                    bal = float(row.get("balance", 0.0))
+                else:
+                    await client.post(f"{SB_URL}/rest/v1/users", json={"user_id": user_id, "balance": 0.0}, headers=SB_HEADERS)
 
     items = [
         {"id": "tg", "name": "Telegram", "country": 6, "country_name": "Индонезия (дешево)", "base_price": 0.25},
@@ -59,17 +68,20 @@ async def redeem_promo(code: str, user_id: str = "demo_user"):
         return {"status": "error", "message": "База Supabase не настроена"}
     async with AsyncSession() as client:
         r = await client.get(f"{SB_URL}/rest/v1/promocodes?code=eq.{code}", headers=SB_HEADERS)
-        if r.status_code == 200 and r.json():
-            amount = float(r.json()["amount"])
-            await client.delete(f"{SB_URL}/rest/v1/promocodes?code=eq.{code}", headers=SB_HEADERS)
-            u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-            cur_bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
-            new_bal = round(cur_bal + amount, 2)
-            if u.status_code == 200 and u.json():
-                await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
-            else:
-                await client.post(f"{SB_URL}/rest/v1/users", json={"user_id": user_id, "balance": new_bal}, headers=SB_HEADERS)
-            return {"status": "ok", "added": amount, "balance": new_bal}
+        if r.status_code == 200:
+            promo = first_item(r.json())
+            if promo:
+                amount = float(promo.get("amount", 0.0))
+                await client.delete(f"{SB_URL}/rest/v1/promocodes?code=eq.{code}", headers=SB_HEADERS)
+                u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
+                user_row = first_item(u.json()) if u.status_code == 200 else None
+                cur_bal = float(user_row.get("balance", 0.0)) if user_row else 0.0
+                new_bal = round(cur_bal + amount, 2)
+                if user_row:
+                    await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
+                else:
+                    await client.post(f"{SB_URL}/rest/v1/users", json={"user_id": user_id, "balance": new_bal}, headers=SB_HEADERS)
+                return {"status": "ok", "added": amount, "balance": new_bal}
     return {"status": "error", "message": "Неверный или уже использованный промокод"}
 
 @app.get("/api/admin/create-promo")
@@ -87,7 +99,8 @@ async def create_promo(secret: str, amount: float):
 async def create_order(service: str, country: int, price: float, user_id: str = "demo_user"):
     async with AsyncSession() as client:
         u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-        bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
+        user_row = first_item(u.json()) if u.status_code == 200 else None
+        bal = float(user_row.get("balance", 0.0)) if user_row else 0.0
         if bal < price:
             return {"status": "error", "message": "Недостаточно средств на балансе!"}
 
@@ -98,9 +111,11 @@ async def create_order(service: str, country: int, price: float, user_id: str = 
             "country": country
         }
         resp = await client.get(SMS_API_URL, params=params)
-        text = resp.text  # Формат: ACCESS_NUMBER:ID:PHONE
+        text = resp.text
         if "ACCESS_NUMBER" in text:
-            _, order_id, phone = text.split(":")
+            parts = text.split(":")
+            order_id = parts[1]
+            phone = parts[2]
             new_bal = round(bal - price, 2)
             await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
             formatted_phone = f"+{phone}" if not phone.startswith("+") else phone
@@ -114,7 +129,8 @@ async def check_status(order_id: str):
         resp = await client.get(SMS_API_URL, params=params)
         text = resp.text
         if "STATUS_OK" in text:
-            code = text.split(":")
+            parts = text.split(":")
+            code = parts[1]
             await client.get(SMS_API_URL, params={"api_key": SMS_API_KEY, "action": "setStatus", "status": "6", "id": order_id})
             return {"status": "received", "code": code}
         return {"status": "waiting"}
@@ -126,7 +142,8 @@ async def cancel_order(order_id: str, price: float, user_id: str = "demo_user"):
         resp = await client.get(SMS_API_URL, params=params)
         if "ACCESS_CANCEL" in resp.text:
             u = await client.get(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", headers=SB_HEADERS)
-            bal = float(u.json()["balance"]) if (u.status_code == 200 and u.json()) else 0.0
+            user_row = first_item(u.json()) if u.status_code == 200 else None
+            bal = float(user_row.get("balance", 0.0)) if user_row else 0.0
             new_bal = round(bal + price, 2)
             await client.patch(f"{SB_URL}/rest/v1/users?user_id=eq.{user_id}", json={"balance": new_bal}, headers=SB_HEADERS)
             return {"status": "ok", "balance": new_bal}
