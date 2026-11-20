@@ -1,3 +1,4 @@
+import os
 import random
 import string
 from curl_cffi.requests import AsyncSession
@@ -8,11 +9,10 @@ app = FastAPI()
 
 # ================= НАСТРОЙКИ =================
 SMS_API_KEY = "1b8d7cc1c33d18031A4b81e7152fAd02"
-BASE_API_URL = "https://hero-sms.com/api/v1"
+BASE_API_URL = "https://hero-sms.com"
 ADMIN_SECRET = "admin123"
 MARKUP = 1.5
 
-# Кука защиты Cloudflare из твоего браузера
 CF_COOKIE = "Cv7CEVdQVA15xbZ_AO5xVhUnbCH22tdnVRnv9s5oheLJ1NJ42UEs1elf5ylh4o3Xw8k9TU1S2oVgAw1lAQyFG_P2XqWBBv6cFWD6u4qNf9SCj3ypHf6K73BoQlUORq8OWTH_jjTevzRBJfJtelNOnykjJMWu14i1Vj5PIX-1AZlCaYZ67zFCHBpNeLsNxO-vUeVFcuTzkgXhAJDkQjuA4l_Fg44dEAeKBWjSv31-bUcVnbM-tIu4kG6lq8fqsjwGC43A6XL8BXZD3GMzGHp9cJ3F3rDEYDQU8vhDguS2chIeaI-I2Ezm"
 # =============================================
 
@@ -21,7 +21,7 @@ API_HEADERS = {
     "Content-Type": "application/json",
     "Accept": "application/json",
     "Origin": "https://hero-sms.com",
-    "Referer": "https://hero-sms.com/ru/api",
+    "Referer": "https://hero-sms.com",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
 }
 
@@ -32,7 +32,8 @@ promocodes = {"TEST1": 1.00}
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    with open("index.html", "r", encoding="utf-8") as f:
+    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    with open(file_path, "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/api/init")
